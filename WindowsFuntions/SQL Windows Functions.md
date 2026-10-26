@@ -497,3 +497,109 @@ WINDOW w AS (PARTITION BY department ORDER BY salary DESC);
 - Window functions are evaluated **after** `WHERE`, `GROUP BY`, and `HAVING`, but **before** the final `ORDER BY`.
 - You cannot filter on them in `WHERE`. Wrap the query in a subquery or CTE.
 - Supported in PostgreSQL, MySQL 8+, SQL Server, Oracle, SQLite 3.25+, BigQuery, and Snowflake.
+
+# Window Function interview questions 
+### 1) What is a window function in SQL?
+A window function performs a calculation across a set of rows related to the current row, without collapsing the result into a single row.
+
+### 2) How is a window function different from GROUP BY?
+GROUP BY reduces rows to one row per group.
+Window functions keep all rows and add calculated values beside them.
+Example: AVG(salary) OVER (PARTITION BY department) shows each employee row plus the department average.
+
+### 3) What does OVER() do?
+OVER() defines the window for the function. It can include:
+
+PARTITION BY to split rows into groups
+ORDER BY to sort rows inside each group
+frame clauses like ROWS BETWEEN ...
+### 4) What is the difference between ROW_NUMBER(), RANK(), and DENSE_RANK()?
+ROW_NUMBER() gives each row a unique number.
+RANK() gives the same rank to ties and leaves gaps.
+DENSE_RANK() gives the same rank to ties but no gaps.
+### 5) What is PARTITION BY used for?
+It divides the result set into groups, and the window function runs separately in each group.
+
+Example: SUM(salary) OVER (PARTITION BY department) gives a separate total for each department.
+
+### 6) What is ORDER BY inside OVER() used for?
+It defines the order of rows within each partition, which is important for ranking, running totals, and functions like LAG() and LEAD().
+
+### 7) What is the use of LAG() and LEAD()?
+LAG() returns a value from a previous row.
+LEAD() returns a value from a following row.
+They are useful for comparing current and previous/next values.
+
+### 8) What is a running total?
+A running total is a cumulative sum over ordered rows.
+
+Example:
+
+```sql
+SUM(salary) OVER (ORDER BY hire_date)
+```
+### 9) What is the difference between ROWS and RANGE?
+ROWS counts physical rows.
+RANGE works on value ranges and includes peers with the same ordering value.
+
+### 10) Why does LAST_VALUE() often give unexpected results?
+Because the default frame ends at the current row when ORDER BY is used. So LAST_VALUE() may return the current row instead of the last row in the partition.
+
+### 11) How do you get the true last value in a partition?
+Use a full frame:
+```sql
+LAST_VALUE(col) OVER (
+  PARTITION BY dept
+  ORDER BY salary
+  ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+)
+```
+### 12) Can window functions be used in WHERE?
+No. They are evaluated after WHERE. Use a subquery or CTE instead.
+
+### 13) Can window functions be used in GROUP BY?
+No, because window functions are calculated after grouping. Use them in the SELECT list or an outer query.
+
+### 14) What is NTILE() used for?
+It divides rows into a number of buckets as evenly as possible.
+
+Example:
+
+```sql
+NTILE(4) OVER (ORDER BY salary)
+```
+splits rows into quartiles.
+
+### 15) What is PERCENT_RANK()?
+It returns the relative rank of a row between 0 and 1.
+
+### 16) What is CUME_DIST()?
+It returns the cumulative distribution: the fraction of rows with values less than or equal to the current row.
+
+### 17) How do you find the top N rows per group?
+Use a ranking function in a CTE or subquery:
+
+```sql
+WITH ranked AS (
+  SELECT *,
+         ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) AS rn
+  FROM employees
+)
+SELECT *
+FROM ranked
+WHERE rn <= 3;
+```
+### 18) Can window functions be nested?
+Usually not directly inside another window function. If needed, use a subquery or CTE.
+
+### 19) Do window functions remove duplicate rows?
+No. They keep all original rows.
+
+### 20) What are common use cases for window functions?
+Running totals
+Moving averages
+Ranking
+Top-N per group
+Comparing current vs previous row
+Percentiles and distributions
+
