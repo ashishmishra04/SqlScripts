@@ -252,7 +252,101 @@ The frame specifies which rows relative to the current row are used.
 ROWS BETWEEN <start> AND <end>
 ```
 
-Boundaries: `UNBOUNDED PRECEDING`, `n PRECEDING`, `CURRENT ROW`, `n FOLLOWING`, `UNBOUNDED FOLLOWING`.
+### SQL Window Frame Boundaries
+
+The frame clause sets which rows, relative to the current row, a window function uses. It has the form `ROWS BETWEEN <start> AND <end>`, where each boundary is one of the five options below.
+
+| Boundary | Meaning |
+|---|---|
+| `UNBOUNDED PRECEDING` | The first row of the partition |
+| `n PRECEDING` | n rows before the current row |
+| `CURRENT ROW` | The current row |
+| `n FOLLOWING` | n rows after the current row |
+| `UNBOUNDED FOLLOWING` | The last row of the partition |
+
+`UNBOUNDED PRECEDING` can only be a start boundary, and `UNBOUNDED FOLLOWING` can only be an end boundary.
+
+---
+
+## Example
+
+This query uses the `employees` table, partitioned by department and ordered by hire date. Each column applies a different frame to `SUM(salary)`:
+
+```sql
+SELECT emp_name, department, hire_date, salary,
+
+       -- From the first row up to the current row (running total)
+       SUM(salary) OVER (
+           PARTITION BY department ORDER BY hire_date
+           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+       ) AS unbounded_to_current,
+
+       -- The previous row plus the current row
+       SUM(salary) OVER (
+           PARTITION BY department ORDER BY hire_date
+           ROWS BETWEEN 1 PRECEDING AND CURRENT ROW
+       ) AS prev_plus_current,
+
+       -- The current row plus the next row
+       SUM(salary) OVER (
+           PARTITION BY department ORDER BY hire_date
+           ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING
+       ) AS current_plus_next,
+
+       -- The current row through the last row (remaining total)
+       SUM(salary) OVER (
+           PARTITION BY department ORDER BY hire_date
+           ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+       ) AS current_to_end
+FROM employees
+ORDER BY department, hire_date;
+```
+
+**Result:**
+
+| emp_name | department | hire_date | salary | unbounded_to_current | prev_plus_current | current_plus_next | current_to_end |
+|---|---|---|---|---|---|---|---|
+| Alice | IT | 2020-01-15 | 90000 | 90000 | 90000 | 165000 | 240000 |
+| Bob | IT | 2021-03-10 | 75000 | 165000 | 165000 | 150000 | 150000 |
+| Carol | IT | 2022-07-01 | 75000 | 240000 | 150000 | 75000 | 75000 |
+| David | HR | 2019-05-20 | 60000 | 60000 | 60000 | 125000 | 125000 |
+| Eva | HR | 2021-11-11 | 65000 | 125000 | 125000 | 65000 | 65000 |
+| Frank | Sales | 2020-08-30 | 50000 | 50000 | 50000 | 120000 | 175000 |
+| Grace | Sales | 2022-02-14 | 70000 | 120000 | 120000 | 125000 | 125000 |
+| Henry | Sales | 2023-01-05 | 55000 | 175000 | 125000 | 55000 | 55000 |
+
+---
+
+## What Each Frame Does
+
+**1. `UNBOUNDED PRECEDING AND CURRENT ROW`**
+This is a running total. For Carol (IT), the frame covers Alice, Bob, and Carol, so the sum is 90000 + 75000 + 75000 = 240000.
+
+**2. `1 PRECEDING AND CURRENT ROW`**
+This is a sliding window of two rows. For Bob, the frame covers Alice and Bob, so the sum is 90000 + 75000 = 165000. The first row in each partition has no previous row, so it only sums itself.
+
+**3. `CURRENT ROW AND 1 FOLLOWING`**
+This looks forward. For Bob, the frame covers Bob and Carol, so the sum is 75000 + 75000 = 150000. The last row in each partition has no next row, so it only sums itself.
+
+**4. `CURRENT ROW AND UNBOUNDED FOLLOWING`**
+This is a reverse running total, summing from the current row to the end. For Bob, it covers Bob and Carol, so the sum is 150000. The last row always equals its own salary.
+
+---
+
+## Shorthand Forms
+
+- `ROWS UNBOUNDED PRECEDING` is the same as `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`.
+- `ROWS 2 PRECEDING` is the same as `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW`.
+
+---
+
+## Practical Notes
+
+- **Centered moving average:** `ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING` averages the previous row, the current row, and the next row.
+- **Full-partition frame:** `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING` makes every row see the whole partition. This is the fix for the `LAST_VALUE` problem.
+- **Which functions use frames:** Aggregates (`SUM`, `AVG`, `COUNT`, `MIN`, `MAX`), `FIRST_VALUE`, `LAST_VALUE`, and `NTH_VALUE` respect the frame. Ranking functions such as `ROW_NUMBER` and `RANK` ignore it.
+- **Default frame:** If `ORDER BY` is present and no frame is given, the default is `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`.
+
 
 ### 4a. Moving Average (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)
 
