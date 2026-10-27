@@ -2,10 +2,12 @@
 
 All questions use the tables below unless stated otherwise. Write the SQL yourself first, then check the answers section at the bottom. Answers use ANSI-style SQL (PostgreSQL / SQL Server / MySQL 8+ compatible unless noted).
 
+**Sample data:** run `window_functions_schema_and_data.sql` to create all seven `tbl_*` tables and load dummy rows. The data includes edge cases on purpose: salary ties, `order_id` gaps, duplicate orders, login streaks, 30-minute session boundaries, overlapping meetings, and NULL sensor readings.
+
 ## Schema
 
 ```sql
-CREATE TABLE employees (
+CREATE TABLE tbl_employees (
     emp_id      INT PRIMARY KEY,
     emp_name    VARCHAR(50),
     department  VARCHAR(30),
@@ -14,7 +16,7 @@ CREATE TABLE employees (
     manager_id  INT
 );
 
-CREATE TABLE orders (
+CREATE TABLE tbl_orders (
     order_id     INT PRIMARY KEY,
     customer_id  INT,
     order_date   DATE,
@@ -22,27 +24,33 @@ CREATE TABLE orders (
     status       VARCHAR(20)      -- 'COMPLETED', 'CANCELLED'
 );
 
-CREATE TABLE stock_prices (
+CREATE TABLE tbl_stock_prices (
     ticker       VARCHAR(10),
     trade_date   DATE,
     close_price  DECIMAL(10,2)
 );
 
-CREATE TABLE logins (
+CREATE TABLE tbl_logins (
     user_id     INT,
     login_date  DATE
 );
 
-CREATE TABLE sessions (
+CREATE TABLE tbl_sessions (
     user_id       INT,
     event_time    TIMESTAMP,
     event_type    VARCHAR(20)
 );
 
-CREATE TABLE meetings (
+CREATE TABLE tbl_meetings (
     room_id     INT,
     start_time  TIMESTAMP,
     end_time    TIMESTAMP
+);
+
+CREATE TABLE tbl_readings (       -- used by Q45
+    sensor_id   INT,
+    ts          TIMESTAMP,
+    value       DECIMAL(10,2)
 );
 ```
 
@@ -62,7 +70,7 @@ CREATE TABLE meetings (
 
 **Q5.** For each customer, return their most recent completed order (all columns).
 
-**Q6.** Remove duplicate rows from `orders` where `(customer_id, order_date, amount)` repeats, keeping the row with the lowest `order_id`. Write the `SELECT` that identifies the rows to delete.
+**Q6.** Remove duplicate rows from `tbl_orders` where `(customer_id, order_date, amount)` repeats, keeping the row with the lowest `order_id`. Write the `SELECT` that identifies the rows to delete.
 
 **Q7.** Split employees into 4 salary quartiles company-wide and return each quartile's minimum salary, maximum salary, and headcount.
 
@@ -132,11 +140,11 @@ CREATE TABLE meetings (
 
 **Q36.** Find gaps in `order_id` values (missing IDs), returning the start and end of each missing range.
 
-**Q37.** Group `sessions` events into sessions where a new session starts after 30 minutes of inactivity. Return `user_id`, `session_id`, `session_start`, `session_end`, and event count.
+**Q37.** Group `tbl_sessions` events into sessions where a new session starts after 30 minutes of inactivity. Return `user_id`, `session_id`, `session_start`, `session_end`, and event count.
 
 **Q38.** Return users who logged in on at least 3 consecutive days at any point.
 
-**Q39.** Return all rows from `meetings` that overlap with at least one other meeting in the same room.
+**Q39.** Return all rows from `tbl_meetings` that overlap with at least one other meeting in the same room.
 
 **Q40.** Merge overlapping meetings in each room into continuous busy blocks.
 
@@ -150,7 +158,7 @@ CREATE TABLE meetings (
 
 **Q44.** Calculate customer retention: for each cohort month (first order month), return the number of customers active in month 0, 1, 2, and 3 after their first order.
 
-**Q45.** Fill forward missing values: given a table `readings(sensor_id, ts, value)` with NULLs in `value`, return each row with the last non-NULL value up to that point (portable, without `IGNORE NULLS`).
+**Q45.** Fill forward missing values: given the table `tbl_readings(sensor_id, ts, value)` with NULLs in `value`, return each row with the last non-NULL value up to that point (portable, without `IGNORE NULLS`).
 
 **Q46.** Return the employee hierarchy depth for each employee and the rank of their salary among peers at the same depth.
 
@@ -174,18 +182,18 @@ CREATE TABLE meetings (
 SELECT emp_id, emp_name, department, salary
 FROM (
     SELECT *, RANK() OVER (PARTITION BY department ORDER BY salary DESC) AS rnk
-    FROM employees
+    FROM tbl_employees
 ) t
 WHERE rnk = 1;
 ```
-`RANK` (or `DENSE_RANK`) keeps all ties at rank 1. `ROW_NUMBER` would return only one.
+`RANK` (or `DENSE_RANK`) keeps all ties at rank 1. `ROW_NUMBER` would return only one. With the sample data, Finance returns both Eva Green and Olivia Jackson (125000 each).
 
 **A2.**
 ```sql
 SELECT MAX(salary) AS third_highest
 FROM (
     SELECT salary, DENSE_RANK() OVER (ORDER BY salary DESC) AS rnk
-    FROM employees
+    FROM tbl_employees
 ) t
 WHERE rnk = 3;
 ```
@@ -196,7 +204,7 @@ WHERE rnk = 3;
 SELECT *
 FROM (
     SELECT *, DENSE_RANK() OVER (PARTITION BY department ORDER BY salary DESC) AS rnk
-    FROM employees
+    FROM tbl_employees
 ) t
 WHERE rnk <= 2;
 ```
@@ -209,7 +217,7 @@ FROM (
     SELECT *, ROW_NUMBER() OVER (
                PARTITION BY department
                ORDER BY salary DESC, hire_date ASC, emp_id ASC) AS rn
-    FROM employees
+    FROM tbl_employees
 ) t
 WHERE rn <= 2;
 ```
@@ -222,7 +230,7 @@ FROM (
     SELECT o.*, ROW_NUMBER() OVER (
                PARTITION BY customer_id
                ORDER BY order_date DESC, order_id DESC) AS rn
-    FROM orders o
+    FROM tbl_orders o
     WHERE status = 'COMPLETED'
 ) t
 WHERE rn = 1;
@@ -237,7 +245,7 @@ FROM (
            ROW_NUMBER() OVER (
                PARTITION BY customer_id, order_date, amount
                ORDER BY order_id) AS rn
-    FROM orders
+    FROM tbl_orders
 ) t
 WHERE rn > 1;
 ```
@@ -251,7 +259,7 @@ SELECT quartile,
        COUNT(*)    AS headcount
 FROM (
     SELECT salary, NTILE(4) OVER (ORDER BY salary) AS quartile
-    FROM employees
+    FROM tbl_employees
 ) t
 GROUP BY quartile
 ORDER BY quartile;
@@ -264,7 +272,7 @@ WITH ranked AS (
     SELECT *,
            ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary) AS rn,
            COUNT(*)     OVER (PARTITION BY department)                 AS cnt
-    FROM employees
+    FROM tbl_employees
 ),
 medians AS (
     SELECT department, AVG(salary * 1.0) AS median_salary
@@ -273,7 +281,7 @@ medians AS (
     GROUP BY department
 )
 SELECT e.*
-FROM employees e
+FROM tbl_employees e
 JOIN medians m ON m.department = e.department
 WHERE e.salary > m.median_salary;
 ```
@@ -282,10 +290,10 @@ For odd counts, both expressions give the middle row. For even counts, they give
 **A9.**
 ```sql
 SELECT emp_id, emp_name, department, salary,
-       ROUND(100 * CUME_DIST() OVER (PARTITION BY department ORDER BY salary), 2) AS pct_at_or_below
-FROM employees;
+       ROUND((100 * CUME_DIST() OVER (PARTITION BY department ORDER BY salary))::numeric, 2) AS pct_at_or_below
+FROM tbl_employees;
 ```
-`CUME_DIST` returns the fraction of rows with value less than or equal to the current row's value.
+`CUME_DIST` returns the fraction of rows with value less than or equal to the current row's value. In PostgreSQL it returns `double precision`, and `ROUND(x, 2)` only exists for `numeric`, so the cast is required. In SQL Server and MySQL, drop the `::numeric` cast.
 
 **A10.**
 ```sql
@@ -294,11 +302,11 @@ FROM (
     SELECT o.*, ROW_NUMBER() OVER (
                PARTITION BY customer_id
                ORDER BY order_date DESC, order_id DESC) AS rn
-    FROM orders o
+    FROM tbl_orders o
 ) t
 WHERE rn = 2;
 ```
-Customers with a single order never produce `rn = 2`, so they are excluded automatically.
+Customers with a single order never produce `rn = 2`, so they are excluded automatically. In the sample data, customer 7 has one order and is excluded.
 
 ## Section B: Running Totals and Aggregates
 
@@ -309,7 +317,7 @@ SELECT order_id, customer_id, order_date, amount,
            PARTITION BY customer_id
            ORDER BY order_date, order_id
            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total
-FROM orders
+FROM tbl_orders
 WHERE status = 'COMPLETED';
 ```
 Adding `order_id` makes the order deterministic. An explicit `ROWS` frame avoids the `RANGE` default, which treats same-date rows as peers and gives them equal totals.
@@ -319,7 +327,7 @@ Adding `order_id` makes the order deterministic. An explicit `ROWS` frame avoids
 SELECT order_id, customer_id, amount,
        SUM(amount) OVER (PARTITION BY customer_id) AS customer_total,
        ROUND(100.0 * amount / SUM(amount) OVER (PARTITION BY customer_id), 2) AS pct_of_total
-FROM orders
+FROM tbl_orders
 WHERE status = 'COMPLETED';
 ```
 
@@ -329,7 +337,7 @@ SELECT DISTINCT department,
        SUM(salary) OVER (PARTITION BY department) AS dept_payroll,
        ROUND(100.0 * SUM(salary) OVER (PARTITION BY department)
              / SUM(salary) OVER (), 2) AS pct_of_payroll
-FROM employees;
+FROM tbl_employees;
 ```
 `DISTINCT` collapses the repeated per-employee rows to one per department. An alternative is `GROUP BY department` with `SUM(SUM(salary)) OVER ()`.
 
@@ -340,7 +348,7 @@ SELECT order_id, customer_id, order_date,
            PARTITION BY customer_id, DATE_TRUNC('month', order_date)
            ORDER BY order_date, order_id
            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cancelled_running
-FROM orders;
+FROM tbl_orders;
 ```
 Adding the month to `PARTITION BY` resets the count. Use `DATE_TRUNC` (PostgreSQL), `DATETRUNC` (SQL Server 2022+), or `DATE_FORMAT(order_date, '%Y-%m')` (MySQL).
 
@@ -349,14 +357,14 @@ Adding the month to `PARTITION BY` resets the count. Use `DATE_TRUNC` (PostgreSQ
 SELECT emp_id, emp_name, department, salary,
        MAX(salary) OVER (PARTITION BY department)          AS dept_max,
        MAX(salary) OVER (PARTITION BY department) - salary AS gap_to_top
-FROM employees;
+FROM tbl_employees;
 ```
 
 **A16.**
 ```sql
 WITH spend AS (
     SELECT customer_id, SUM(amount) AS total_spend
-    FROM orders
+    FROM tbl_orders
     WHERE status = 'COMPLETED'
     GROUP BY customer_id
 ),
@@ -381,7 +389,7 @@ SELECT order_id, customer_id, order_date, amount,
            PARTITION BY customer_id
            ORDER BY order_date, order_id
            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_max
-FROM orders;
+FROM tbl_orders;
 ```
 
 **A18.**
@@ -391,7 +399,7 @@ SELECT order_id, customer_id, amount,
            PARTITION BY customer_id
            ORDER BY order_date, order_id
            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS avg_prior_orders
-FROM orders;
+FROM tbl_orders;
 ```
 This is the average of all prior orders. To exclude the current row from the whole partition instead, use `(SUM(amount) OVER (PARTITION BY customer_id) - amount) / NULLIF(COUNT(*) OVER (PARTITION BY customer_id) - 1, 0)`.
 
@@ -402,7 +410,7 @@ This is the average of all prior orders. To exclude the current row from the who
 SELECT order_id, customer_id, order_date,
        order_date - LAG(order_date) OVER (
            PARTITION BY customer_id ORDER BY order_date, order_id) AS days_since_prev
-FROM orders;
+FROM tbl_orders;
 ```
 This is PostgreSQL date subtraction. In SQL Server use `DATEDIFF(day, LAG(order_date) OVER (...), order_date)`. In MySQL use `DATEDIFF(order_date, LAG(order_date) OVER (...))`.
 
@@ -410,7 +418,7 @@ This is PostgreSQL date subtraction. In SQL Server use `DATEDIFF(day, LAG(order_
 ```sql
 WITH monthly AS (
     SELECT DATE_TRUNC('month', order_date) AS month, SUM(amount) AS revenue
-    FROM orders
+    FROM tbl_orders
     WHERE status = 'COMPLETED'
     GROUP BY 1
 )
@@ -427,7 +435,7 @@ WITH x AS (
     SELECT customer_id, order_id, order_date, amount,
            LAG(amount, 1) OVER (PARTITION BY customer_id ORDER BY order_date, order_id) AS p1,
            LAG(amount, 2) OVER (PARTITION BY customer_id ORDER BY order_date, order_id) AS p2
-    FROM orders
+    FROM tbl_orders
 )
 SELECT DISTINCT customer_id
 FROM x
@@ -442,7 +450,7 @@ FROM (
     SELECT *,
            LAG(close_price)  OVER (PARTITION BY ticker ORDER BY trade_date) AS prev_p,
            LEAD(close_price) OVER (PARTITION BY ticker ORDER BY trade_date) AS next_p
-    FROM stock_prices
+    FROM tbl_stock_prices
 ) t
 WHERE close_price > prev_p AND close_price > next_p;
 ```
@@ -457,7 +465,7 @@ SELECT DISTINCT customer_id,
        LAST_VALUE(amount) OVER (
            PARTITION BY customer_id ORDER BY order_date, order_id
            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_amount
-FROM orders;
+FROM tbl_orders;
 ```
 Without the full frame, `LAST_VALUE` returns the current row.
 
@@ -466,14 +474,14 @@ Without the full frame, `LAST_VALUE` returns the current row.
 SELECT emp_id, emp_name, department, hire_date, salary,
        LEAD(salary) OVER (PARTITION BY department ORDER BY hire_date, emp_id) AS next_hire_salary,
        LEAD(salary) OVER (PARTITION BY department ORDER BY hire_date, emp_id) - salary AS diff
-FROM employees;
+FROM tbl_employees;
 ```
 
 **A25.**
 ```sql
 WITH monthly AS (
     SELECT DATE_TRUNC('month', order_date) AS month, SUM(amount) AS revenue
-    FROM orders
+    FROM tbl_orders
     WHERE status = 'COMPLETED'
     GROUP BY 1
 )
@@ -483,7 +491,7 @@ SELECT month, revenue,
              / NULLIF(LAG(revenue, 12) OVER (ORDER BY month), 0), 2) AS yoy_pct
 FROM monthly;
 ```
-Offset 12 is correct only if every month exists with no gaps. With missing months, join to a calendar table first or self-join on `month - INTERVAL '1 year'`.
+Offset 12 is correct only if every month exists with no gaps. With missing months, join to a calendar table first or self-join on `month - INTERVAL '1 year'`. The sample data covers 18 consecutive months, so Jan to Jun 2024 have a prior-year value.
 
 **A26.**
 ```sql
@@ -491,7 +499,7 @@ SELECT *
 FROM (
     SELECT o.*,
            LAG(amount) OVER (PARTITION BY customer_id ORDER BY order_date, order_id) AS prev_amount
-    FROM orders o
+    FROM tbl_orders o
 ) t
 WHERE prev_amount IS NOT NULL
   AND ABS(amount - prev_amount) > 0.5 * prev_amount;
@@ -505,7 +513,7 @@ SELECT ticker, trade_date, close_price,
        AVG(close_price) OVER (
            PARTITION BY ticker ORDER BY trade_date
            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS ma7
-FROM stock_prices;
+FROM tbl_stock_prices;
 ```
 `6 PRECEDING` plus the current row makes 7 rows. The first 6 rows average over fewer rows. Add a `CASE WHEN COUNT(*) OVER (...) = 7` guard if you want NULL until the window is full.
 
@@ -513,7 +521,7 @@ FROM stock_prices;
 ```sql
 WITH daily AS (
     SELECT order_date, SUM(amount) AS day_total
-    FROM orders
+    FROM tbl_orders
     WHERE status = 'COMPLETED'
     GROUP BY order_date
 )
@@ -523,7 +531,7 @@ SELECT order_date, day_total,
            RANGE BETWEEN INTERVAL '6 days' PRECEDING AND CURRENT ROW) AS ma7_calendar
 FROM daily;
 ```
-`RANGE` with an interval works in PostgreSQL 11+ and Oracle. For a true calendar average that counts days with no orders as zero, left join `daily` to a generated date spine and use `COALESCE(day_total, 0)` with `ROWS BETWEEN 6 PRECEDING AND CURRENT ROW`. SQL Server does not support interval `RANGE` frames, so use the date spine approach there.
+`RANGE` with an interval works in PostgreSQL 11+ and Oracle. Note that it averages only the days that have orders. For a true calendar average that counts days with no orders as zero, left join `daily` to a generated date spine and use `COALESCE(day_total, 0)` with `ROWS BETWEEN 6 PRECEDING AND CURRENT ROW`. SQL Server does not support interval `RANGE` frames, so use the date spine approach there.
 
 **A29.**
 ```sql
@@ -531,7 +539,7 @@ SELECT ticker, trade_date, close_price,
        MAX(close_price) OVER (
            PARTITION BY ticker ORDER BY trade_date
            ROWS BETWEEN 1 FOLLOWING AND 5 FOLLOWING) AS max_next_5
-FROM stock_prices;
+FROM tbl_stock_prices;
 ```
 Frames that start at `1 FOLLOWING` exclude the current row.
 
@@ -542,7 +550,7 @@ SELECT order_id, customer_id, order_date, amount,
            PARTITION BY customer_id
            ORDER BY order_date, order_id
            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_amount
-FROM orders;
+FROM tbl_orders;
 ```
 With `ORDER BY` and no explicit frame, the default is `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`. The frame stops at the current row, so the "last" value is the current row's own value. Extend the frame to `UNBOUNDED FOLLOWING`, or use `FIRST_VALUE` with a reversed `ORDER BY`.
 
@@ -553,9 +561,9 @@ SELECT emp_id, department, hire_date, salary,
                          RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_range,
        SUM(salary) OVER (PARTITION BY department ORDER BY hire_date
                          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_rows
-FROM employees;
+FROM tbl_employees;
 ```
-If two employees share a `hire_date`, `RANGE` gives both the same total, because peers are included together. `ROWS` increments row by row in an arbitrary order unless you add a tiebreaker.
+If two employees share a `hire_date`, `RANGE` gives both the same total, because peers are included together. `ROWS` increments row by row in an arbitrary order unless you add a tiebreaker. In the sample data, Frank Miller and Grace Lee (Engineering, 2018-01-10) show the difference.
 
 **A32.**
 ```sql
@@ -564,7 +572,7 @@ SELECT order_id, customer_id, order_date,
            PARTITION BY customer_id
            ORDER BY order_date
            RANGE BETWEEN INTERVAL '30 days' PRECEDING AND INTERVAL '1 day' PRECEDING) AS orders_prev_30d
-FROM orders;
+FROM tbl_orders;
 ```
 This works in PostgreSQL 11+ because `order_date` is a date column. Same-day orders are excluded by the `1 day PRECEDING` end boundary. On engines without interval `RANGE`, use a correlated subquery or a self-join on date ranges.
 
@@ -578,7 +586,7 @@ WITH ma AS (
            COUNT(*) OVER (
                PARTITION BY ticker ORDER BY trade_date
                ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS n
-    FROM stock_prices
+    FROM tbl_stock_prices
 ),
 ranked AS (
     SELECT *, RANK() OVER (PARTITION BY ticker ORDER BY ma5 DESC) AS rnk
@@ -596,7 +604,7 @@ Filtering on `n = 5` excludes the early partial windows.
 **A34.**
 ```sql
 WITH d AS (
-    SELECT DISTINCT user_id, login_date FROM logins
+    SELECT DISTINCT user_id, login_date FROM tbl_logins
 ),
 grp AS (
     SELECT user_id, login_date,
@@ -611,12 +619,12 @@ FROM (
 ) s
 GROUP BY user_id;
 ```
-The classic islands trick: subtracting the row number from a consecutive date gives a constant value for each unbroken streak. De-duplicating first is essential.
+The classic islands trick: subtracting the row number from a consecutive date gives a constant value for each unbroken streak. De-duplicating first is essential (user 1 logs in twice on 3 Jan in the sample data).
 
 **A35.**
 ```sql
 WITH d AS (
-    SELECT DISTINCT user_id, login_date FROM logins
+    SELECT DISTINCT user_id, login_date FROM tbl_logins
 ),
 grp AS (
     SELECT user_id, login_date,
@@ -640,7 +648,7 @@ SELECT order_id + 1 AS gap_start,
 FROM (
     SELECT order_id,
            LEAD(order_id) OVER (ORDER BY order_id) AS next_id
-    FROM orders
+    FROM tbl_orders
 ) t
 WHERE next_id - order_id > 1;
 ```
@@ -654,7 +662,7 @@ WITH flagged AS (
                      > INTERVAL '30 minutes'
                   OR LAG(event_time) OVER (PARTITION BY user_id ORDER BY event_time) IS NULL
                 THEN 1 ELSE 0 END AS is_new_session
-    FROM sessions
+    FROM tbl_sessions
 ),
 numbered AS (
     SELECT *, SUM(is_new_session) OVER (
@@ -669,12 +677,12 @@ SELECT user_id, session_id,
 FROM numbered
 GROUP BY user_id, session_id;
 ```
-The pattern is flag boundaries with `LAG`, then a cumulative `SUM` of the flags to build a session number. It is one of the most common senior-level window patterns.
+The pattern is flag boundaries with `LAG`, then a cumulative `SUM` of the flags to build a session number. It is one of the most common senior-level window patterns. A gap of exactly 30 minutes stays in the same session because the test is strictly greater than.
 
 **A38.**
 ```sql
 WITH d AS (
-    SELECT DISTINCT user_id, login_date FROM logins
+    SELECT DISTINCT user_id, login_date FROM tbl_logins
 ),
 x AS (
     SELECT user_id, login_date,
@@ -696,12 +704,12 @@ FROM (
                PARTITION BY room_id ORDER BY start_time, end_time
                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_max_end,
            LEAD(start_time) OVER (PARTITION BY room_id ORDER BY start_time, end_time) AS next_start
-    FROM meetings m
+    FROM tbl_meetings m
 ) t
 WHERE start_time < prev_max_end
    OR end_time > next_start;
 ```
-A meeting overlaps an earlier one if it starts before the running maximum end time of earlier meetings. It overlaps a later one if it ends after the next meeting's start. Together these two tests flag both sides of each overlap.
+A meeting overlaps an earlier one if it starts before the running maximum end time of earlier meetings. It overlaps a later one if it ends after the next meeting's start. Together these two tests flag both sides of each overlap. Back-to-back meetings (one ends at 10:00, the next starts at 10:00) do not count as overlapping.
 
 **A40.**
 ```sql
@@ -710,7 +718,7 @@ WITH x AS (
            MAX(end_time) OVER (
                PARTITION BY room_id ORDER BY start_time, end_time
                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_max_end
-    FROM meetings
+    FROM tbl_meetings
 ),
 flagged AS (
     SELECT *,
@@ -729,7 +737,7 @@ SELECT room_id, block_id,
 FROM blocks
 GROUP BY room_id, block_id;
 ```
-A new block starts only when the current meeting starts after everything before it has ended. Use `>=` instead of `>` if back-to-back meetings should merge.
+A new block starts only when the current meeting starts after everything before it has ended. Use `>=` instead of `>` if back-to-back meetings should merge. As written, back-to-back meetings merge, because a start equal to the previous end is not greater than it.
 
 **A41.**
 ```sql
@@ -737,7 +745,7 @@ WITH x AS (
     SELECT ticker, trade_date, close_price,
            CASE WHEN close_price > LAG(close_price) OVER (PARTITION BY ticker ORDER BY trade_date)
                 THEN 0 ELSE 1 END AS reset
-    FROM stock_prices
+    FROM tbl_stock_prices
 ),
 g AS (
     SELECT *, SUM(reset) OVER (
@@ -763,7 +771,7 @@ WITH r AS (
     SELECT department, salary,
            ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary) AS rn,
            COUNT(*)     OVER (PARTITION BY department)                 AS cnt
-    FROM employees
+    FROM tbl_employees
 )
 SELECT department, AVG(salary * 1.0) AS median_salary
 FROM r
@@ -780,7 +788,7 @@ FROM (
            ROW_NUMBER() OVER (
                PARTITION BY customer_id, DATE_TRUNC('month', order_date)
                ORDER BY order_date, order_id) AS rn
-    FROM orders o
+    FROM tbl_orders o
 ) t
 WHERE rn = 1;
 ```
@@ -790,7 +798,7 @@ WHERE rn = 1;
 WITH first_order AS (
     SELECT customer_id,
            DATE_TRUNC('month', MIN(order_date)) AS cohort_month
-    FROM orders
+    FROM tbl_orders
     GROUP BY customer_id
 ),
 activity AS (
@@ -800,7 +808,7 @@ activity AS (
             + EXTRACT(MONTH FROM DATE_TRUNC('month', o.order_date)))
          - (EXTRACT(YEAR FROM f.cohort_month) * 12
             + EXTRACT(MONTH FROM f.cohort_month)) AS month_offset
-    FROM orders o
+    FROM tbl_orders o
     JOIN first_order f ON f.customer_id = o.customer_id
 )
 SELECT cohort_month,
@@ -821,23 +829,23 @@ WITH g AS (
            COUNT(value) OVER (
                PARTITION BY sensor_id ORDER BY ts
                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS grp
-    FROM readings
+    FROM tbl_readings
 )
 SELECT sensor_id, ts, value,
        MAX(value) OVER (PARTITION BY sensor_id, grp) AS filled_value
 FROM g;
 ```
-`COUNT(value)` ignores NULLs, so it increments only on non-NULL rows. Each non-NULL value and the NULLs that follow it share one group number, and `MAX` over the group returns that non-NULL value. Oracle, Snowflake, and others offer `LAST_VALUE(value IGNORE NULLS)` as the shorter form.
+`COUNT(value)` ignores NULLs, so it increments only on non-NULL rows. Each non-NULL value and the NULLs that follow it share one group number, and `MAX` over the group returns that non-NULL value. Leading NULLs (sensor 2's first row in the sample data) stay NULL because there is nothing earlier to fill from. Oracle, Snowflake, and others offer `LAST_VALUE(value IGNORE NULLS)` as the shorter form.
 
 **A46.**
 ```sql
 WITH RECURSIVE h AS (
     SELECT emp_id, emp_name, department, salary, manager_id, 1 AS depth
-    FROM employees
+    FROM tbl_employees
     WHERE manager_id IS NULL
     UNION ALL
     SELECT e.emp_id, e.emp_name, e.department, e.salary, e.manager_id, h.depth + 1
-    FROM employees e
+    FROM tbl_employees e
     JOIN h ON e.manager_id = h.emp_id
 )
 SELECT emp_id, emp_name, depth, salary,
@@ -855,7 +863,7 @@ SELECT DISTINCT department,
        FIRST_VALUE(emp_name) OVER (
            PARTITION BY department ORDER BY hire_date DESC, emp_id
            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS shortest_tenure
-FROM employees;
+FROM tbl_employees;
 ```
 Two `FIRST_VALUE` calls with opposite sort orders avoid the `LAST_VALUE` frame pitfall.
 
@@ -865,7 +873,7 @@ WITH monthly_customer AS (
     SELECT DATE_TRUNC('month', order_date) AS month,
            customer_id,
            SUM(amount) AS revenue
-    FROM orders
+    FROM tbl_orders
     WHERE status = 'COMPLETED'
     GROUP BY 1, 2
 ),
@@ -880,7 +888,7 @@ FROM ranked
 WHERE rn <= 3
   AND month_total > 10000;
 ```
-Two window functions with the same `PARTITION BY` run in one pass. The filters on `rn` and `month_total` both sit in the outer `WHERE`.
+Two window functions with the same `PARTITION BY` run in one pass. The filters on `rn` and `month_total` both sit in the outer `WHERE`. In the sample data, four months exceed 10,000: March 2023, November 2023, February 2024, and May 2024.
 
 **A49.**
 ```sql
@@ -889,7 +897,7 @@ SELECT order_id, customer_id, order_date, amount,
            PARTITION BY customer_id
            ORDER BY order_date
            RANGE BETWEEN INTERVAL '89 days' PRECEDING AND CURRENT ROW) AS rolling_90d
-FROM orders
+FROM tbl_orders
 WHERE status = 'COMPLETED';
 ```
 `RANGE` with an interval windows by date, not by row count. It requires PostgreSQL 11+ or Oracle. In SQL Server or MySQL, use a correlated subquery or a `CROSS APPLY` / lateral join:
@@ -897,11 +905,11 @@ WHERE status = 'COMPLETED';
 ```sql
 SELECT o.order_id, o.customer_id, o.order_date, o.amount,
        (SELECT SUM(i.amount)
-        FROM orders i
+        FROM tbl_orders i
         WHERE i.customer_id = o.customer_id
           AND i.status = 'COMPLETED'
           AND i.order_date BETWEEN o.order_date - INTERVAL '89 days' AND o.order_date) AS rolling_90d
-FROM orders o
+FROM tbl_orders o
 WHERE o.status = 'COMPLETED';
 ```
 Note that `RANGE` includes all rows sharing the current `order_date`, so same-day orders see each other's amounts.
@@ -916,13 +924,13 @@ Diagnosis steps:
 
 ```sql
 -- PostgreSQL
-CREATE INDEX ix_orders_cust_date
-    ON orders (customer_id, order_date, order_id)
+CREATE INDEX ix_tbl_orders_cust_date
+    ON tbl_orders (customer_id, order_date, order_id)
     INCLUDE (amount);
 
 -- SQL Server
-CREATE NONCLUSTERED INDEX ix_orders_cust_date
-    ON orders (customer_id, order_date, order_id)
+CREATE NONCLUSTERED INDEX ix_tbl_orders_cust_date
+    ON tbl_orders (customer_id, order_date, order_id)
     INCLUDE (amount);
 ```
    With this index the engine reads rows already ordered by partition and order key, which removes the sort. In SQL Server, a columnstore index with batch mode on rowstore (compat level 150+) can also speed up window aggregates significantly.
